@@ -2,13 +2,18 @@ package com.example.composecameraxpreviewcrop.camera
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.graphics.Color
+import android.util.Log
+import android.util.Rational
+import android.view.Surface
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
-import androidx.camera.view.LifecycleCameraController
+import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,7 +35,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -45,12 +53,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.example.composecameraxpreviewcrop.extensions.cropImage
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
+import com.example.composecameraxpreviewcrop.extensions.getCameraProvider
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import java.util.concurrent.Executors
 
 @Composable
 fun CameraScreen(
@@ -65,36 +74,64 @@ fun CameraScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CameraContent() {
-
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraController = remember {
-        LifecycleCameraController(context)
-    }
-
     val screenWidthPx = with(LocalDensity.current) {
         LocalConfiguration.current.screenWidthDp.dp.toPx()
     }
     val screenHeightPx = with(LocalDensity.current) {
         LocalConfiguration.current.screenHeightDp.dp.toPx()
     }
+    val halfSingleNumberCropBoxHeightPx = screenHeightPx / 20
 
+    // cropbox
     // number
     var numberOfTicket by remember {
         mutableStateOf<Int>(1)
     }
-    val halfOriginalCropBoxHeightPx = with(LocalDensity.current) {
-        25.dp.toPx()
-    }
-
-    // cropbox
     var cropBoxStartYPx by remember {
-        mutableStateOf<Float>(screenHeightPx / 2 - numberOfTicket * halfOriginalCropBoxHeightPx)
+        mutableStateOf<Float>(screenHeightPx / 2 - numberOfTicket * halfSingleNumberCropBoxHeightPx)
     }
     var cropBoxEndYPx by remember {
-        mutableStateOf<Float>(screenHeightPx / 2 + numberOfTicket * halfOriginalCropBoxHeightPx)
+        mutableStateOf<Float>(screenHeightPx / 2 + numberOfTicket * halfSingleNumberCropBoxHeightPx)
     }
     val cropBoxHorizontalPadding = screenWidthPx / 5
+
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val executor = remember {
+        Executors.newSingleThreadExecutor()
+    }
+    val lensFacing = CameraSelector.LENS_FACING_BACK
+    val preview = Preview.Builder().build()
+    val imageCapture = remember {
+        ImageCapture.Builder().build()
+    }
+
+    val cameraSelector = CameraSelector.Builder()
+        .requireLensFacing(lensFacing)
+        .build()
+    val recognizer = remember {
+        TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+    }
+
+    var recognizedText by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    LaunchedEffect(lensFacing) {
+        val cameraProvider = context.getCameraProvider()
+
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            cameraSelector,
+            preview,
+            imageCapture
+        )
+    }
+
+
+
+
 
     val cropOffsetX = cropBoxHorizontalPadding
     val cropOffsetY = cropBoxStartYPx
@@ -112,12 +149,13 @@ private fun CameraContent() {
             FloatingActionButton(
                 onClick = {
                     val mainExecutor = ContextCompat.getMainExecutor(context)
-                    cameraController.takePicture(
+                    imageCapture.takePicture(
                         mainExecutor,
                         object : ImageCapture.OnImageCapturedCallback() {
                             override fun  onCaptureSuccess(image: ImageProxy) {
                                 super.onCaptureSuccess(image)
 
+                                /*
                                 lifecycleOwner.lifecycleScope.launch {
                                     capturedImage = image.image?.cropImage(
                                         image.imageInfo.rotationDegrees,
@@ -132,6 +170,29 @@ private fun CameraContent() {
                                     image.image?.close()
                                     image.close()
                                 }
+
+                                 */
+                                val img = image.image
+                                val format = img?.format
+
+                                Log.d("Main", format!!.toString())
+                                val mediaImage = image.image
+                                
+                                if (mediaImage != null) {
+                                    val img = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+
+                                    recognizer.process(img)
+                                        .addOnSuccessListener {  visionText ->
+
+                                        }
+                                        .addOnFailureListener {  e ->
+                                            e.printStackTrace()
+                                        }
+                                }
+
+
+                                image.image?.close()
+                                image.close()
                             }
 
                             override fun onError(exception: ImageCaptureException) {
@@ -170,8 +231,8 @@ private fun CameraContent() {
                 NumberDropDownMenu(
                     modifier = Modifier.weight(2f)
                 ) { num ->
-                    cropBoxStartYPx = screenHeightPx / 2 - num * halfOriginalCropBoxHeightPx
-                    cropBoxEndYPx = screenHeightPx / 2 + num * halfOriginalCropBoxHeightPx
+                    cropBoxStartYPx = screenHeightPx / 2 - num * halfSingleNumberCropBoxHeightPx
+                    cropBoxEndYPx = screenHeightPx / 2 + num * halfSingleNumberCropBoxHeightPx
                 }
 
                 IconButton(
@@ -201,11 +262,15 @@ private fun CameraContent() {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                    setBackgroundColor(Color.BLACK)
-                    scaleType = PreviewView.ScaleType.FILL_START
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    scaleType = PreviewView.ScaleType.FIT_CENTER
                 }.also { previewView ->
+                    /*
                     previewView.controller = cameraController
                     cameraController.bindToLifecycle(lifecycleOwner)
+                     */
+                    preview.setSurfaceProvider(previewView.surfaceProvider)
+
                 }
             }
         )
@@ -217,7 +282,7 @@ private fun CameraContent() {
         )
 
         Column(
-            verticalArrangement = Arrangement.Bottom,
+            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxSize()
         ) {
@@ -226,6 +291,13 @@ private fun CameraContent() {
                     model = capturedImage,
                     contentDescription = "",
                     modifier = Modifier.width(300.dp)
+                )
+            }
+
+            recognizedText?.let {
+                Text(
+                    text = it,
+                    color = Color.Red
                 )
             }
         }
