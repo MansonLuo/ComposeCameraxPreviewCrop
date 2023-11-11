@@ -13,3 +13,15 @@ suspend fun Context.getCameraProvider(): ProcessCameraProvider = suspendCoroutin
         }, ContextCompat.getMainExecutor(this))
     }
 }
+
+fun Context.getImageOutputRootDirectory(): String {
+    var rootImageDirectory = ""
+
+    try {
+        rootImageDirectory = this.getExternalFilesDir("croppedImages")?.absolutePath!!
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    return rootImageDirectory
+}
